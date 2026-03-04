@@ -6,9 +6,25 @@ readme = "README.md"
 authors = [
     { name = "ryanchaiyakul", email = "ryanchaiyakul@gmail.com" }
 ]
-requires-python = ">=3.13"
-dependencies = []
+requires-python = ">=3.12"
+dependencies = [
+    "newton",
+    "pyglet>=2.1.13",
+]
 
 [build-system]
 requires = ["uv_build>=0.10.0,<0.11.0"]
 build-backend = "uv_build"
+
+[tool.uv.workspace]
+members = [
+    "external/newton",
+]
+
+[tool.uv.sources]
+newton = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.4",
+]
