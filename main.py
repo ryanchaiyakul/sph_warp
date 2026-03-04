@@ -1,116 +1,95 @@
-from newton import ModelBuilder
-from sph_warp import SolverWCSPH
-
 import numpy as np
 import warp as wp
 import warp.render
+from newton import ModelBuilder
+
+from sph_warp import SolverWCSPH
 
 if __name__ == "__main__":
+    wp.init()
     builder = ModelBuilder()
     SolverWCSPH.register_custom_attributes(builder)
 
-    # 1. SETUP PARAMETERS
+    # --- Physical Setup based on the Paper ---
+    # We want a column of water in a larger tank
+    rho0 = 1000.0
     h = 0.1
-    m = 1.0
-    # Place two particles heading for a head-on collision
-    # Initially outside h-range, they will enter it around Frame 10
-    builder.add_particle(
-        pos=wp.vec3(-0.06, 0.0, 0.1), vel=wp.vec3(0.5, 0.0, 0.0), mass=m, radius=0.02
-    )
-    builder.add_particle(
-        pos=wp.vec3(0.06, 0.0, 0.1), vel=wp.vec3(-0.5, 0.0, 0.0), mass=m, radius=0.02
+    # To have ~30-50 neighbors, we set spacing dx = 0.5 * h
+    dx = 0.05
+
+    # Water Column Dimensions (H = 4.0m as per your text)
+    # Reducing width/length for fewer particles
+    column_width = 1.0
+    column_height = 2.0
+    column_length = 1.0
+
+    # Calculate particles per dimension
+    dim_x = int(column_width / dx)
+    dim_y = int(column_length / dx)
+    dim_z = int(column_height / dx)
+
+    # Mass of one particle: Volume per particle * Density
+    particle_vol = dx**3
+    particle_mass = particle_vol * rho0
+
+    print(f"Simulating {dim_x * dim_y * dim_z} particles...")
+
+    # Build the water column
+    builder.add_particle_grid(
+        pos=wp.vec3(0.0, 0.0, 0.05),  # Slightly above floor
+        rot=wp.quat_identity(),
+        vel=wp.vec3(0.0, 0.0, 0.0),
+        dim_x=dim_x,
+        dim_y=dim_y,
+        dim_z=dim_z,
+        cell_x=dx,
+        cell_y=dx,
+        cell_z=dx,
+        mass=particle_mass,
+        radius_mean=dx * 0.5,
+        jitter=0.0,
     )
 
     model = builder.finalize()
     solver = SolverWCSPH(model)
 
-    # 2. CALIBRATION FOR TEST
-    solver.stiffness = 50000.0  # Medium stiffness to see clear compression
-    solver.gravity = wp.vec3(0.0, 0.0, 0.0)  # Turn off gravity to isolate SPH forces
+    # Override defaults with paper's specific WCSPH values
+    solver.rho0 = 1000.0
+    solver.h = 0.1
+    solver.stiffness = 1119000.0
+    solver.c_s = 88.5
+    solver.alpha = 0.3  # Start low for stability
+
+    # The exact time step from the paper
+    dt = 4.52e-4
 
     state0 = model.state()
     state1 = model.state()
-    dt = 1e-4
 
-    print(f"{'Frame':<8} | {'Dist':<10} | {'RelVel':<10} | {'P0_Acc_X':<10}")
-    print("-" * 50)
+    # Tank bounds (Mirroring the paper's dam break setup)
+    # You may need to update your 'advect' kernel to use these limits
+    tank_size = 5.0
 
-    for f in range(1000):
-        solver.step(state0, state1, None, None, dt)
+    renderer = wp.render.UsdRenderer("dam_break.usd", up_axis="Z")
 
-        # Access data for verification
-        q = state1.particle_q.numpy()
-        v = state1.particle_qd.numpy()
-        f_vec = state0.particle_f.numpy()  # Force from the previous step calculation
+    fps = 60
+    sim_substeps = int((1.0 / fps) / dt)
 
-        dist = np.linalg.norm(q[0] - q[1])
-        rel_vel = v[0][0] - v[1][0]
-        acc_x = f_vec[0][0] / m
+    for f in range(200):  # Total frames
+        for _ in range(sim_substeps):
+            solver.step(state0, state1, None, None, dt)
+            state0, state1 = state1, state0
 
-        # Every 5 frames, print the status
-        if f % 10 == 0:
-            status = "Approaching" if dist > h else "INTERACTING"
-            print(f"{f:<8} | {dist:.6f} | {rel_vel:.6f} | {acc_x:.6f} ({status})")
-
-        state0, state1 = state1, state0
-
-    print("-" * 50)
-    print(
-        "TEST COMPLETE: If acc_x became negative after interaction, pressure is REPULSIVE."
-    )
-
-
-def main():
-    sand_builder = ModelBuilder()
-    SolverWCSPH.register_custom_attributes(sand_builder)
-    particles_per_cell = 3.0
-    density = 2500.0
-    voxel_size = 0.05
-
-    bed_lo = np.array([-1.0, -1.0, 0.0])
-    bed_hi = np.array([1.0, 1.0, 0.5])
-    bed_res = np.array(
-        np.ceil(particles_per_cell * (bed_hi - bed_lo) / voxel_size), dtype=int
-    )
-
-    cell_size = (bed_hi - bed_lo) / bed_res
-    cell_volume = np.prod(cell_size)
-    radius = float(np.max(cell_size) * 0.5)
-    mass = float(np.prod(cell_volume) * density)
-
-    sand_builder.add_particle_grid(
-        pos=wp.vec3(bed_lo),
-        rot=wp.quat_identity(),  # type: ignore
-        vel=wp.vec3(0.0),
-        dim_x=bed_res[0] + 1,
-        dim_y=bed_res[1] + 1,
-        dim_z=bed_res[2] + 1,
-        cell_x=cell_size[0],
-        cell_y=cell_size[1],
-        cell_z=cell_size[2],
-        mass=mass,
-        jitter=0.0 * radius,
-        radius_mean=radius,
-        # custom_attributes={"mpm:friction": 0.75},
-    )
-    sand_model = sand_builder.finalize()
-    solver = SolverWCSPH(sand_model)
-
-    state0 = sand_model.state()
-    state1 = sand_model.state()
-    renderer = wp.render.OpenGLRenderer(up_axis="Z")
-    dt = 1e-3
-    frames = 500
-
-    for f in range(frames):
-        solver.step(state0, state1, None, None, dt)
-        renderer.begin_frame(f * dt)
+        renderer.begin_frame(f / fps)
         renderer.render_points(
             name="fluid",
-            points=state1.particle_q.numpy(),
-            radius=radius,
-            colors=(0.2, 0.6, 0.9),
+            points=state0.particle_q.numpy(),
+            radius=dx * 0.5,
+            colors=(0.2, 0.5, 0.9),
         )
         renderer.end_frame()
-        state0, state1 = state1, state0
+        print(np.max(solver.particle_rho.numpy()))
+        print(np.average(solver.particle_rho.numpy()))
+        print(f"Frame {f} complete")
+
     renderer.save()

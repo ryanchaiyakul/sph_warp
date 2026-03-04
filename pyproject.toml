@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
     "newton",
     "pyglet>=2.1.13",
+    "usd-core>=26.3",
 ]
 
 [build-system]
