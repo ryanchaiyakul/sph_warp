@@ -1,7 +1,7 @@
-import numpy as np
 import warp as wp
-import warp.render
+
 from newton import ModelBuilder
+from newton.viewer import ViewerGL
 
 from sph_warp import SolverWCSPH
 
@@ -10,17 +10,14 @@ if __name__ == "__main__":
     builder = ModelBuilder()
     SolverWCSPH.register_custom_attributes(builder)
 
-    # --- Physical Setup based on the Paper ---
-    # We want a column of water in a larger tank
     rho0 = 1000.0
     h = 0.1
-    # To have ~30-50 neighbors, we set spacing dx = 0.5 * h
     dx = 0.05
 
     # Water Column Dimensions (H = 4.0m as per your text)
     # Reducing width/length for fewer particles
     column_width = 1.0
-    column_height = 2.0
+    column_height = 4.0
     column_length = 1.0
 
     # Calculate particles per dimension
@@ -47,7 +44,7 @@ if __name__ == "__main__":
         cell_z=dx,
         mass=particle_mass,
         radius_mean=dx * 0.5,
-        jitter=0.0,
+        jitter=0.1 * h,
     )
 
     model = builder.finalize()
@@ -58,7 +55,7 @@ if __name__ == "__main__":
     solver.h = 0.1
     solver.stiffness = 1119000.0
     solver.c_s = 88.5
-    solver.alpha = 0.3  # Start low for stability
+    solver.alpha = 0.1  # Start low for stability
 
     # The exact time step from the paper
     dt = 4.52e-4
@@ -70,8 +67,9 @@ if __name__ == "__main__":
     # You may need to update your 'advect' kernel to use these limits
     tank_size = 5.0
 
-    renderer = wp.render.UsdRenderer("dam_break.usd", up_axis="Z")
-
+    viewer = ViewerGL()
+    viewer.set_model(model)
+    viewer.show_particles = True
     fps = 60
     sim_substeps = int((1.0 / fps) / dt)
 
@@ -80,16 +78,6 @@ if __name__ == "__main__":
             solver.step(state0, state1, None, None, dt)
             state0, state1 = state1, state0
 
-        renderer.begin_frame(f / fps)
-        renderer.render_points(
-            name="fluid",
-            points=state0.particle_q.numpy(),
-            radius=dx * 0.5,
-            colors=(0.2, 0.5, 0.9),
-        )
-        renderer.end_frame()
-        print(np.max(solver.particle_rho.numpy()))
-        print(np.average(solver.particle_rho.numpy()))
-        print(f"Frame {f} complete")
-
-    renderer.save()
+        viewer.begin_frame(f)
+        viewer.log_state(state1)
+        viewer.end_frame()

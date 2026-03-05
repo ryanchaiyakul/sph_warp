@@ -131,8 +131,8 @@ def advect(
     x = q_in[tid] + v * dt
 
     # Simple bounds
-    length = 1.0
-    width = 1.0
+    length = 2.0
+    width = 2.0
     damping = -0.5
 
     if x[0] < -length:

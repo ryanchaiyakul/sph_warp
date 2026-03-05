@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "newton",
+    "pillow>=12.1.1",
     "pyglet>=2.1.13",
     "usd-core>=26.3",
 ]

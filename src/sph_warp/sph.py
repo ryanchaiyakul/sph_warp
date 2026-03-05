@@ -19,7 +19,7 @@ class SolverWCSPH(SolverBase):
         self.sph = getattr(model, WCSPH)
         self.grid_res = int(self.sph.grid_resolution.numpy()[0])
         self.h = float(self.sph.h.numpy()[0])
-        self.rho0 = float(self.sph.density0.numpy()[0])
+        self.rho0 = float(self.sph.rho0.numpy()[0])
 
         self.cell_size = self.h * 2.0
         self.grid = wp.HashGrid(
@@ -52,7 +52,7 @@ class SolverWCSPH(SolverBase):
         )
         builder.add_custom_attribute(
             ModelBuilder.CustomAttribute(
-                name="density0",
+                name="rho0",
                 frequency=Model.AttributeFrequency.ONCE,
                 assignment=Model.AttributeAssignment.MODEL,
                 dtype=float,
@@ -63,6 +63,16 @@ class SolverWCSPH(SolverBase):
         builder.add_custom_attribute(
             ModelBuilder.CustomAttribute(
                 name="grid_resolution",
+                frequency=Model.AttributeFrequency.ONCE,
+                assignment=Model.AttributeAssignment.MODEL,
+                dtype=int,
+                namespace=WCSPH,
+                default=128,
+            )
+        )
+        builder.add_custom_attribute(
+            ModelBuilder.CustomAttribute(
+                name="stiffness",
                 frequency=Model.AttributeFrequency.ONCE,
                 assignment=Model.AttributeAssignment.MODEL,
                 dtype=int,
