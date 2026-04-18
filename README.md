@@ -1,5 +1,7 @@
 # sph_warp
 
+![example](docs/example.gif)
+
 A GPU-accelerated Weakly Compressible Smoothed Particle Hydrodynamics (WCSPH) fluid solver with rigid body coupling, built on [NVIDIA Warp](https://github.com/NVIDIA/warp) and integrated with [Newton](https://github.com/example/newton).
 
 ## Installation
