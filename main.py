@@ -1,95 +1,149 @@
-import numpy as np
 import warp as wp
-import warp.render
+
 from newton import ModelBuilder
+from newton.solvers import SolverFeatherstone
+from newton.viewer import ViewerGL
 
 from sph_warp import SolverWCSPH
 
-if __name__ == "__main__":
-    wp.init()
-    builder = ModelBuilder()
-    SolverWCSPH.register_custom_attributes(builder)
 
-    # --- Physical Setup based on the Paper ---
-    # We want a column of water in a larger tank
-    rho0 = 1000.0
-    h = 0.1
-    # To have ~30-50 neighbors, we set spacing dx = 0.5 * h
-    dx = 0.05
+if __name__ == "__main__":  
+    # Initialize rigid solver  
+    rigid_builder = ModelBuilder()  
+  
+    # Drop height for all shapes  
+    drop_height = 1.5
+    spacing = 0.5
+    x_gap = 0.5
+    y_gap = 0.5
+  
+    # BOX  
+    body_id = rigid_builder.add_body(label="box")  
+    rigid_builder.add_shape_box(  
+        body=body_id,  
+        xform=[spacing, y_gap, drop_height, 0.0, 0.0, 0.0, 0.0],  
+        hx=0.125,  
+        hy=0.125,  
+        hz=0.125,  
+        cfg=ModelBuilder.ShapeConfig(density=1000.0),  
+        label="box_shape",  
+    )  
+  
+    # SPHERE  
+    body_id = rigid_builder.add_body(label="sphere")  
+    rigid_builder.add_shape_sphere(  
+        body=body_id,  
+        xform=[spacing * 2, y_gap, drop_height, 0.0, 0.0, 0.0, 0.0],  
+        radius=0.125,  
+        cfg=ModelBuilder.ShapeConfig(density=1000.0),  
+        label="sphere_shape",  
+    )  
+  
+    # CAPSULE  
+    body_id = rigid_builder.add_body(label="capsule")  
+    rigid_builder.add_shape_capsule(  
+        body=body_id,  
+        xform=[spacing*3, y_gap, drop_height, 0.0, 0.0, 0.0, 0.0],  
+        radius=0.125,  
+        half_height=0.25,  
+        cfg=ModelBuilder.ShapeConfig(density=1000.0),  
+        label="capsule_shape",  
+    )  
+  
+    # CYLINDER  
+    body_id = rigid_builder.add_body(label="cylinder")  
+    rigid_builder.add_shape_cylinder(  
+        body=body_id,  
+        xform=[spacing*4, y_gap, drop_height, 0.0, 0.0, 0.0, 0.0],  
+        radius=0.125,  
+        half_height=0.25,  
+        cfg=ModelBuilder.ShapeConfig(density=1000.0),  
+        label="cylinder_shape",  
+    )  
+  
+    # CONE  
+    body_id = rigid_builder.add_body(label="cone")  
+    rigid_builder.add_shape_cone(  
+        body=body_id,  
+        xform=[spacing*5, y_gap, drop_height, 0.0, 0.0, 0.0, 0.0],  
+        radius=0.125,  
+        half_height=0.25,  
+        cfg=ModelBuilder.ShapeConfig(density=1000.0),  
+        label="cone_shape",  
+    )  
+  
+    # ELLIPSOID  
+    body_id = rigid_builder.add_body(label="ellipsoid")  
+    rigid_builder.add_shape_ellipsoid(  
+        body=body_id,  
+        xform=[spacing*6, y_gap, drop_height, 0.0, 0.0, 0.0, 0.0],  
+        a=0.15,  
+        b=0.10,  
+        c=0.125,  
+        cfg=ModelBuilder.ShapeConfig(density=1000.0),  
+        label="ellipsoid_shape",  
+    )  
+  
+    rigid_model = rigid_builder.finalize()  
+    rigid_solver = SolverFeatherstone(rigid_model)
 
-    # Water Column Dimensions (H = 4.0m as per your text)
-    # Reducing width/length for fewer particles
-    column_width = 1.0
-    column_height = 2.0
-    column_length = 1.0
+    # Initialize fluid solver
+    fluid_builder = ModelBuilder()
+    SolverWCSPH.register_custom_attributes(fluid_builder)
+    SolverWCSPH.add_fluid_block(fluid_builder, [3.5, 1.0, 1.0])
+    SolverWCSPH.add_rigid_bodies(fluid_builder, rigid_model)
+    fluid_model = fluid_builder.finalize()
+    fluid_solver = SolverWCSPH(fluid_model, rigid_model)
 
-    # Calculate particles per dimension
-    dim_x = int(column_width / dx)
-    dim_y = int(column_length / dx)
-    dim_z = int(column_height / dx)
+    # Initialize states for GPU swapping
+    rigid_state0 = rigid_model.state()
+    rigid_state1 = rigid_model.state()
+    rigid_state2 = rigid_model.state()  # for interp
 
-    # Mass of one particle: Volume per particle * Density
-    particle_vol = dx**3
-    particle_mass = particle_vol * rho0
+    fluid_state0 = fluid_model.state()
+    fluid_state1 = fluid_model.state()
 
-    print(f"Simulating {dim_x * dim_y * dim_z} particles...")
-
-    # Build the water column
-    builder.add_particle_grid(
-        pos=wp.vec3(0.0, 0.0, 0.05),  # Slightly above floor
-        rot=wp.quat_identity(),
-        vel=wp.vec3(0.0, 0.0, 0.0),
-        dim_x=dim_x,
-        dim_y=dim_y,
-        dim_z=dim_z,
-        cell_x=dx,
-        cell_y=dx,
-        cell_z=dx,
-        mass=particle_mass,
-        radius_mean=dx * 0.5,
-        jitter=0.0,
-    )
-
-    model = builder.finalize()
-    solver = SolverWCSPH(model)
-
-    # Override defaults with paper's specific WCSPH values
-    solver.rho0 = 1000.0
-    solver.h = 0.1
-    solver.stiffness = 1119000.0
-    solver.c_s = 88.5
-    solver.alpha = 0.3  # Start low for stability
-
-    # The exact time step from the paper
-    dt = 4.52e-4
-
-    state0 = model.state()
-    state1 = model.state()
-
-    # Tank bounds (Mirroring the paper's dam break setup)
-    # You may need to update your 'advect' kernel to use these limits
-    tank_size = 5.0
-
-    renderer = wp.render.UsdRenderer("dam_break.usd", up_axis="Z")
+    # Initialize viewer
+    viewer = ViewerGL()
+    viewer.set_model(fluid_model)
+    viewer.show_particles = True
 
     fps = 60
-    sim_substeps = int((1.0 / fps) / dt)
+    frames = 360
+    dt_fluid = 4.52e-4
+    rigid_ratio = 8
 
-    for f in range(200):  # Total frames
-        for _ in range(sim_substeps):
-            solver.step(state0, state1, None, None, dt)
-            state0, state1 = state1, state0
+    dt_rigid = dt_fluid * rigid_ratio
+    macro_steps = int((1.0 / fps) / dt_rigid)
 
-        renderer.begin_frame(f / fps)
-        renderer.render_points(
-            name="fluid",
-            points=state0.particle_q.numpy(),
-            radius=dx * 0.5,
-            colors=(0.2, 0.5, 0.9),
-        )
-        renderer.end_frame()
-        print(np.max(solver.particle_rho.numpy()))
-        print(np.average(solver.particle_rho.numpy()))
-        print(f"Frame {f} complete")
+    for f in range(frames):
+        with wp.ScopedTimer("step"):
+            for _ in range(macro_steps):
+                # rigid step
+                rigid_solver.step(rigid_state0, rigid_state1, None, None, dt_rigid)
+                rigid_state1.clear_forces()
 
-    renderer.save()
+                for i in range(rigid_ratio):
+                    fluid_state0.clear_forces()
+
+                    # r_s2 = (1 - α)r_s0 + αr_s1
+                    alpha = (i + 1.0) / rigid_ratio
+                    fluid_solver.interpolate_rigid_states(
+                        rigid_state0, rigid_state1, alpha, rigid_state2
+                    )
+
+                    # fluid step
+                    fluid_solver.update_rigid_particles(rigid_state2, fluid_state0)
+                    fluid_solver.step(fluid_state0, fluid_state1, None, None, dt_fluid)
+                    fluid_solver.accumulate_rigid_forces(rigid_state1, fluid_state1)
+                    fluid_state0, fluid_state1 = fluid_state1, fluid_state0
+
+                # divide by # of steps
+                fluid_solver.average_rigid_forces(rigid_state1, rigid_ratio)
+                rigid_state0, rigid_state1 = rigid_state1, rigid_state0
+
+        viewer.begin_frame(f * (1 / fps))
+        viewer.log_state(fluid_state0)
+        viewer.end_frame()
+
+    viewer.close()
