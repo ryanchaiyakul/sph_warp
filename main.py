@@ -1,91 +1,93 @@
 import warp as wp
 
-from newton import ModelBuilder
-from newton.solvers import SolverFeatherstone
+from newton import ModelBuilder, eval_fk, CollisionPipeline
+from newton.solvers import SolverSemiImplicit
 from newton.viewer import ViewerGL
 
 from sph_warp import SolverWCSPH
 
 
-if __name__ == "__main__":  
-    # Initialize rigid solver  
-    rigid_builder = ModelBuilder()  
-  
-    # Drop height for all shapes  
+if __name__ == "__main__":
+    # Initialize rigid solver
+    rigid_builder = ModelBuilder()
+
+    # Drop height for all shapes
     drop_height = 1.5
     spacing = 0.5
     x_gap = 0.5
     y_gap = 0.5
-  
-    # BOX  
-    body_id = rigid_builder.add_body(label="box")  
-    rigid_builder.add_shape_box(  
-        body=body_id,  
-        xform=[spacing, y_gap, drop_height, 0.0, 0.0, 0.0, 0.0],  
-        hx=0.125,  
-        hy=0.125,  
-        hz=0.125,  
-        cfg=ModelBuilder.ShapeConfig(density=1000.0),  
-        label="box_shape",  
-    )  
-  
-    # SPHERE  
-    body_id = rigid_builder.add_body(label="sphere")  
-    rigid_builder.add_shape_sphere(  
-        body=body_id,  
-        xform=[spacing * 2, y_gap, drop_height, 0.0, 0.0, 0.0, 0.0],  
-        radius=0.125,  
-        cfg=ModelBuilder.ShapeConfig(density=1000.0),  
-        label="sphere_shape",  
-    )  
-  
-    # CAPSULE  
-    body_id = rigid_builder.add_body(label="capsule")  
-    rigid_builder.add_shape_capsule(  
-        body=body_id,  
-        xform=[spacing*3, y_gap, drop_height, 0.0, 0.0, 0.0, 0.0],  
-        radius=0.125,  
-        half_height=0.25,  
-        cfg=ModelBuilder.ShapeConfig(density=1000.0),  
-        label="capsule_shape",  
-    )  
-  
-    # CYLINDER  
-    body_id = rigid_builder.add_body(label="cylinder")  
-    rigid_builder.add_shape_cylinder(  
-        body=body_id,  
-        xform=[spacing*4, y_gap, drop_height, 0.0, 0.0, 0.0, 0.0],  
-        radius=0.125,  
-        half_height=0.25,  
-        cfg=ModelBuilder.ShapeConfig(density=1000.0),  
-        label="cylinder_shape",  
-    )  
-  
-    # CONE  
-    body_id = rigid_builder.add_body(label="cone")  
-    rigid_builder.add_shape_cone(  
-        body=body_id,  
-        xform=[spacing*5, y_gap, drop_height, 0.0, 0.0, 0.0, 0.0],  
-        radius=0.125,  
-        half_height=0.25,  
-        cfg=ModelBuilder.ShapeConfig(density=1000.0),  
-        label="cone_shape",  
-    )  
-  
-    # ELLIPSOID  
-    body_id = rigid_builder.add_body(label="ellipsoid")  
-    rigid_builder.add_shape_ellipsoid(  
-        body=body_id,  
-        xform=[spacing*6, y_gap, drop_height, 0.0, 0.0, 0.0, 0.0],  
-        a=0.15,  
-        b=0.10,  
-        c=0.125,  
-        cfg=ModelBuilder.ShapeConfig(density=1000.0),  
-        label="ellipsoid_shape",  
-    )  
-  
-    rigid_model = rigid_builder.finalize()  
-    rigid_solver = SolverFeatherstone(rigid_model)
+
+    # BOX
+    body_id = rigid_builder.add_body(label="box")
+    rigid_builder.add_shape_box(
+        body=body_id,
+        xform=[spacing, y_gap, drop_height, 0.0, 0.0, 0.0, 1.0],
+        hx=0.125,
+        hy=0.125,
+        hz=0.125,
+        cfg=ModelBuilder.ShapeConfig(density=1000.0),
+        label="box_shape",
+    )
+
+    # SPHERE
+    body_id = rigid_builder.add_body(label="sphere")
+    rigid_builder.add_shape_sphere(
+        body=body_id,
+        xform=[spacing * 2, y_gap, drop_height, 0.0, 0.0, 0.0, 1.0],
+        radius=0.125,
+        cfg=ModelBuilder.ShapeConfig(density=1000.0),
+        label="sphere_shape",
+    )
+
+    # CAPSULE
+    body_id = rigid_builder.add_body(label="capsule")
+    rigid_builder.add_shape_capsule(
+        body=body_id,
+        xform=[spacing * 3, y_gap, drop_height, 0.0, 0.0, 0.0, 1.0],
+        radius=0.125,
+        half_height=0.25,
+        cfg=ModelBuilder.ShapeConfig(density=1000.0),
+        label="capsule_shape",
+    )
+
+    # CYLINDER
+    body_id = rigid_builder.add_body(label="cylinder")
+    rigid_builder.add_shape_cylinder(
+        body=body_id,
+        xform=[spacing * 4, y_gap, drop_height, 0.0, 0.0, 0.0, 1.0],
+        radius=0.125,
+        half_height=0.25,
+        cfg=ModelBuilder.ShapeConfig(density=1000.0),
+        label="cylinder_shape",
+    )
+
+    # CONE
+    body_id = rigid_builder.add_body(label="cone")
+    rigid_builder.add_shape_cone(
+        body=body_id,
+        xform=[spacing * 5, y_gap, drop_height, 0.1, 0.2, 0.3, 0.9],
+        radius=0.125,
+        half_height=0.25,
+        cfg=ModelBuilder.ShapeConfig(density=1000.0),
+        label="cone_shape",
+    )
+
+    # ELLIPSOID
+    body_id = rigid_builder.add_body(label="ellipsoid")
+    rigid_builder.add_shape_ellipsoid(
+        body=body_id,
+        xform=[spacing * 6, y_gap, drop_height, 0.0, 0.0, 0.0, 1.0],
+        a=0.15,
+        b=0.10,
+        c=0.125,
+        cfg=ModelBuilder.ShapeConfig(density=1000.0),
+        label="ellipsoid_shape",
+    )
+
+    rigid_model = rigid_builder.finalize()
+    rigid_solver = SolverSemiImplicit(rigid_model)
+    collision_pipeline = CollisionPipeline(rigid_model, broad_phase="sap")
+    rigid_contacts = collision_pipeline.contacts()
 
     # Initialize fluid solver
     fluid_builder = ModelBuilder()
@@ -103,9 +105,17 @@ if __name__ == "__main__":
     fluid_state0 = fluid_model.state()
     fluid_state1 = fluid_model.state()
 
+    # Combined model for rendering only
+    combined_builder = ModelBuilder()
+    combined_builder.add_world(rigid_builder)  # World 0
+    combined_builder.add_world(fluid_builder)  # World 1
+    combined_model = combined_builder.finalize()
+    combined_state = combined_model.state()
+
     # Initialize viewer
     viewer = ViewerGL()
-    viewer.set_model(fluid_model)
+    viewer.set_model(combined_model)
+    viewer.set_world_offsets((0.0, 0.0, 0.0)) # So the two
     viewer.show_particles = True
 
     fps = 60
@@ -120,7 +130,11 @@ if __name__ == "__main__":
         with wp.ScopedTimer("step"):
             for _ in range(macro_steps):
                 # rigid step
-                rigid_solver.step(rigid_state0, rigid_state1, None, None, dt_rigid)
+                collision_pipeline.collide(rigid_state0, rigid_contacts)
+                rigid_solver.step(
+                    rigid_state0, rigid_state1, None, rigid_contacts, dt_rigid
+                )
+                # eval_fk(rigid_model, rigid_state1.joint_q, rigid_state1.joint_qd, rigid_state1)
                 rigid_state1.clear_forces()
 
                 for i in range(rigid_ratio):
@@ -142,8 +156,16 @@ if __name__ == "__main__":
                 fluid_solver.average_rigid_forces(rigid_state1, rigid_ratio)
                 rigid_state0, rigid_state1 = rigid_state1, rigid_state0
 
+        # Update World 0 (rigid bodies)  
+        combined_state.body_q = rigid_state0.body_q  
+        combined_state.body_qd = rigid_state0.body_qd  
+        
+        # Update World 1 (fluid particles)  
+        combined_state.particle_q = fluid_state0.particle_q  
+        combined_state.particle_qd = fluid_state0.particle_qd
+
         viewer.begin_frame(f * (1 / fps))
-        viewer.log_state(fluid_state0)
+        viewer.log_state(combined_state)
         viewer.end_frame()
 
     viewer.close()
