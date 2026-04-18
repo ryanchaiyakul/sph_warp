@@ -1,14 +1,15 @@
 [project]
 name = "sph-warp"
 version = "0.1.0"
-description = "Add your description here"
+description = "WCSPH implementation for Newton."
 readme = "README.md"
 authors = [
     { name = "ryanchaiyakul", email = "ryanchaiyakul@gmail.com" }
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "newton",
+    "imgui-bundle>=1.92.5",
+    "newton>=1.0.0",
     "pillow>=12.1.1",
     "pyglet>=2.1.13",
     "usd-core>=26.3",
@@ -17,14 +18,6 @@ dependencies = [
 [build-system]
 requires = ["uv_build>=0.10.0,<0.11.0"]
 build-backend = "uv_build"
-
-[tool.uv.workspace]
-members = [
-    "external/newton",
-]
-
-[tool.uv.sources]
-newton = { workspace = true }
 
 [dependency-groups]
 dev = [

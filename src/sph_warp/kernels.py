@@ -11,7 +11,6 @@ def cube(q: float):
     return q * q * q
 
 
-# W(x_i-x_j, h)
 @wp.func
 def cubic(r: wp.vec3, h: float) -> float:
     k = 8.0 / wp.pi / cube(h)
@@ -56,100 +55,245 @@ def get_viscosity(
 
 
 @wp.kernel
+def update_rigid_particles(
+    particle_q0_local: wp.array(dtype=wp.vec3),
+    particle_body: wp.array(dtype=int),
+    body_q: wp.array(dtype=wp.transform),
+    body_qd: wp.array(dtype=wp.spatial_vector),
+    particle_q: wp.array(dtype=wp.vec3),
+    particle_qd: wp.array(dtype=wp.vec3),
+):
+    tid = wp.tid()
+    body_id = particle_body[tid]
+
+    if body_id >= 0:
+        X_wb = body_q[body_id]
+        particle_q[tid] = wp.transform_point(X_wb, particle_q0_local[tid])
+        # TODO: update particle_qd
+
+
+@wp.kernel
+def compute_particle_q0_local(
+    particle_q0: wp.array(dtype=wp.vec3),
+    particle_body: wp.array(dtype=int),
+    body_q0: wp.array(dtype=wp.transform),
+    particle_q0_local: wp.array(dtype=wp.vec3),
+):
+    tid = wp.tid()
+    body_id = particle_body[tid]
+
+    if body_id >= 0:
+        X_bw = wp.transform_inverse(body_q0[body_id])
+        particle_q0_local[tid] = wp.transform_point(X_bw, particle_q0[tid])
+
+
+@wp.kernel
+def compute_body_f(
+    particle_q: wp.array(dtype=wp.vec3),
+    particle_f: wp.array(dtype=wp.vec3),
+    particle_body: wp.array(dtype=int),
+    body_q: wp.array(dtype=wp.transform),
+    body_com: wp.array(dtype=wp.vec3),
+    body_f: wp.array(dtype=wp.spatial_vector),
+):
+    tid = wp.tid()
+    body_id = particle_body[tid]
+
+    if body_id >= 0:
+        f = particle_f[tid]
+        pos = particle_q[tid]
+        r = pos - wp.transform_point(body_q[body_id], body_com[body_id])
+        wp.atomic_add(body_f, body_id, wp.spatial_vector(f, wp.cross(r, f)))
+
+
+@wp.kernel
+def compute_m_V(
+    grid: wp.uint64,
+    particle_q: wp.array(dtype=wp.vec3),
+    particle_body: wp.array(dtype=int),
+    h: float,
+    rho0: float,
+    m_V: wp.array(dtype=float),
+):
+    tid = wp.tid()
+    i = wp.hash_grid_point_id(grid, tid)
+    if particle_body[i] < 0:
+        return
+
+    q_i = particle_q[i]
+    delta = float(0.0)
+    for j in wp.hash_grid_query(grid, q_i, h):
+        if particle_body[j] >= 0:
+            delta += cubic(q_i - particle_q[j], h)
+
+    m_V[i] = rho0 * 1.0 / delta if delta > 0.0 else 0.0
+
+
+@wp.kernel
 def compute_rho(
     grid: wp.uint64,
-    q: wp.array(dtype=wp.vec3),
-    mass: wp.array(dtype=float),
+    particle_q: wp.array(dtype=wp.vec3),
+    particle_body: wp.array(dtype=int),
+    m_V: wp.array(dtype=float),
     h: float,
     rho: wp.array(dtype=float),
 ):
     tid = wp.tid()
     i = wp.hash_grid_point_id(grid, tid)
-    q_i = q[i]
+    if particle_body[i] >= 0:
+        return
+
+    q_i = particle_q[i]
     rho_sum = float(0.0)
-    neighbors = wp.hash_grid_query(grid, q_i, h)
-    for index in neighbors:
-        rho_sum += mass[index] * cubic(q_i - q[index], h)
+    for j in wp.hash_grid_query(grid, q_i, h):
+        rho_sum += m_V[j] * cubic(q_i - particle_q[j], h)
     rho[i] = rho_sum
 
 
 @wp.kernel
 def compute_p(
     rho: wp.array(dtype=float),
+    particle_body: wp.array(dtype=int),
     rho0: float,
     stiffness: float,
     p: wp.array(dtype=float),
 ):
     tid = wp.tid()
+    if particle_body[tid] >= 0:
+        return
+
     p[tid] = stiffness * (wp.pow(wp.max(rho[tid] / rho0, 1.0), 7.0) - 1.0)
 
 
 @wp.kernel
 def compute_particle_f(
     grid: wp.uint64,
-    q: wp.array(dtype=wp.vec3),
-    qd: wp.array(dtype=wp.vec3),
-    mass: wp.array(dtype=float),
+    particle_q: wp.array(dtype=wp.vec3),
+    particle_qd: wp.array(dtype=wp.vec3),
+    particle_body: wp.array(dtype=int),
+    m_V: wp.array(dtype=float),
     rho: wp.array(dtype=float),
     p: wp.array(dtype=float),
     h: float,
+    rho0: float,
     c_s: float,
     alpha: float,
     gravity: wp.vec3,
-    f: wp.array(dtype=wp.vec3),
+    particle_f: wp.array(dtype=wp.vec3),
 ):
     tid = wp.tid()
     i = wp.hash_grid_point_id(grid, tid)
-    q_i = q[i]
-    qd_i = qd[i]
-    rho_i = rho[i]
-    f_sum = wp.vec3(0.0)
+    if particle_body[i] >= 0:
+        return
+
+    q_i, qd_i, rho_i = particle_q[i], particle_qd[i], rho[i]
+    dp_i = p[i] / square(rho_i)
+    a_sum = wp.vec3(0.0)
     for j in wp.hash_grid_query(grid, q_i, h):
         if i == j:
             continue
-        distance = q_i - q[j]
-        del_v = qd_i - qd[j]
-        dpi = p[i] / square(rho_i)
-        dpj = p[j] / square(rho[j])
-        visc_ij = get_viscosity(distance, del_v, rho_i, rho[j], h, c_s, alpha)
-        f_sum += -mass[j] * (dpi + dpj + visc_ij) * diff_cubic(q_i - q[j], h)
-    f[i] = mass[i] * (f_sum + gravity)
+
+        dist = q_i - particle_q[j]
+        del_v = qd_i - particle_qd[j]
+        grad_w = diff_cubic(dist, h)
+
+        is_rigid = particle_body[j] >= 0
+        rho_j = rho0 if is_rigid else rho[j]
+        dp_j = (p[i] if is_rigid else p[j]) / square(rho_j)
+        visc_ij = (
+            0.0 if is_rigid else get_viscosity(dist, del_v, rho_i, rho_j, h, c_s, alpha)
+        )
+        a = -m_V[j] * (dp_i + dp_j + visc_ij) * grad_w
+        a_sum += a
+
+        if is_rigid:
+            wp.atomic_add(particle_f, j, -m_V[i] * a)
+
+    particle_f[i] = m_V[i] * (a_sum + gravity)
 
 
 @wp.kernel
 def advect(
-    q_in: wp.array(dtype=wp.vec3),
-    qd_in: wp.array(dtype=wp.vec3),
-    f_in: wp.array(dtype=wp.vec3),
-    m: wp.array(dtype=float),
+    particle_q_in: wp.array(dtype=wp.vec3),
+    particle_qd_in: wp.array(dtype=wp.vec3),
+    particle_f_in: wp.array(dtype=wp.vec3),
+    particle_body: wp.array(dtype=int),
+    m_V: wp.array(dtype=float),
     dt: float,
-    q_out: wp.array(dtype=wp.vec3),
-    qd_out: wp.array(dtype=wp.vec3),
+    particle_q_out: wp.array(dtype=wp.vec3),
+    particle_qd_out: wp.array(dtype=wp.vec3),
 ):
     tid = wp.tid()
-    v = qd_in[tid] + (f_in[tid] / m[tid]) * dt
-    x = q_in[tid] + v * dt
+    if particle_body[tid] >= 0:
+        return
 
-    # Simple bounds
-    length = 2.0
-    width = 2.0
-    damping = -0.5
+    v = particle_qd_in[tid] + (particle_f_in[tid] / m_V[tid]) * dt
+    x = particle_q_in[tid] + v * dt
 
-    if x[0] < -length:
-        x = wp.vec3(-length, x[1], x[2])
-        v = wp.vec3(v[0] * damping, v[1], v[2])
-    if x[0] > length:
+    # Simple bounds w/ collison
+    # TODO: parametrize bounds
+    length = 3.5
+    width = 1.0
+    restitution = 0.5
+
+    normal = wp.vec3(0.0)
+    if x[0] < 0.0:
+        x = wp.vec3(0.0, x[1], x[2])
+        normal += wp.vec3(1.0, 0.0, 0.0)
+    elif x[0] > length:
         x = wp.vec3(length, x[1], x[2])
-        v = wp.vec3(v[0] * damping, v[1], v[2])
-    if x[1] < -width:
-        x = wp.vec3(x[0], -width, x[2])
-        v = wp.vec3(v[0], v[1] * damping, v[2])
-    if x[1] > width:
+        normal += wp.vec3(-1.0, 0.0, 0.0)
+    if x[1] < 0.0:
+        x = wp.vec3(x[0], 0.0, x[2])
+        normal += wp.vec3(0.0, 1.0, 0.0)
+    elif x[1] > width:
         x = wp.vec3(x[0], width, x[2])
-        v = wp.vec3(v[0], v[1] * damping, v[2])
+        normal += wp.vec3(0.0, -1.0, 0.0)
     if x[2] < 0.0:
         x = wp.vec3(x[0], x[1], 0.0)
-        v = wp.vec3(v[0], v[1], v[2] * damping)
+        normal += wp.vec3(0.0, 0.0, 1.0)
 
-    q_out[tid] = x
-    qd_out[tid] = v
+    mag = wp.length(normal)
+    if mag > 0.0:
+        n = wp.normalize(normal)
+        v -= (1.0 + restitution) * wp.dot(v, n) * n
+
+    particle_q_out[tid] = x
+    particle_qd_out[tid] = v
+
+
+@wp.kernel
+def interpolate_rigid_states_kernel(
+    body_q0: wp.array(dtype=wp.transform),
+    body_q1: wp.array(dtype=wp.transform),
+    body_qd0: wp.array(dtype=wp.spatial_vector),
+    body_qd1: wp.array(dtype=wp.spatial_vector),
+    alpha: float,
+    body_q_interp: wp.array(dtype=wp.transform),
+    body_qd_interp: wp.array(dtype=wp.spatial_vector),
+):
+    tid = wp.tid()
+
+    # Interpolate position (linear)
+    pos0 = wp.transform_get_translation(body_q0[tid])
+    pos1 = wp.transform_get_translation(body_q1[tid])
+    pos_interp = (1.0 - alpha) * pos0 + alpha * pos1
+
+    # Interpolate rotation (SLERP)
+    quat0 = wp.transform_get_rotation(body_q0[tid])
+    quat1 = wp.transform_get_rotation(body_q1[tid])
+    quat_interp = wp.quat_slerp(quat0, quat1, alpha)
+
+    # Combine into interpolated transform
+    body_q_interp[tid] = wp.transform(pos_interp, quat_interp)
+
+    # Linear interpolation for velocities
+    vel0 = body_qd0[tid]
+    vel1 = body_qd1[tid]
+    body_qd_interp[tid] = (1.0 - alpha) * vel0 + alpha * vel1
+
+
+@wp.kernel
+def average_forces_kernel(body_f: wp.array(dtype=wp.spatial_vector), count: float):
+    tid = wp.tid()
+    body_f[tid] = body_f[tid] / count
