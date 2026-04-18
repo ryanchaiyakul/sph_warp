@@ -46,8 +46,6 @@ This will:
 3. Simulate fluid-rigid coupling for 360 frames at 60 FPS
 4. Display real-time visualization with particles
 
-## TODO:
+### WIP
 
-- [ ] Parametrize fluid bouding region.
-- [ ] Add rigid-rigid contact to `main.py`.
 - [ ] Test with [NeRD](https://github.com/NVlabs/neural-robot-dynamics) as rigid solver.

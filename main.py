@@ -1,10 +1,9 @@
 import warp as wp
 
-from newton import ModelBuilder, eval_fk, CollisionPipeline
+from newton import ModelBuilder, CollisionPipeline
 from newton.solvers import SolverSemiImplicit
-from newton.viewer import ViewerGL
 
-from sph_warp import SolverWCSPH
+from sph_warp import SolverWCSPH, FluidRigidCoupler, CoupledRender
 
 
 if __name__ == "__main__":
@@ -93,9 +92,10 @@ if __name__ == "__main__":
     fluid_builder = ModelBuilder()
     SolverWCSPH.register_custom_attributes(fluid_builder)
     SolverWCSPH.add_fluid_block(fluid_builder, [3.5, 1.0, 1.0])
-    SolverWCSPH.add_rigid_bodies(fluid_builder, rigid_model)
+    FluidRigidCoupler.add_rigid_bodies(fluid_builder, rigid_model)
     fluid_model = fluid_builder.finalize()
-    fluid_solver = SolverWCSPH(fluid_model, rigid_model)
+    fluid_solver = SolverWCSPH(fluid_model)
+    coupler = FluidRigidCoupler(fluid_model, rigid_model)
 
     # Initialize states for GPU swapping
     rigid_state0 = rigid_model.state()
@@ -105,18 +105,7 @@ if __name__ == "__main__":
     fluid_state0 = fluid_model.state()
     fluid_state1 = fluid_model.state()
 
-    # Combined model for rendering only
-    combined_builder = ModelBuilder()
-    combined_builder.add_world(rigid_builder)  # World 0
-    combined_builder.add_world(fluid_builder)  # World 1
-    combined_model = combined_builder.finalize()
-    combined_state = combined_model.state()
-
-    # Initialize viewer
-    viewer = ViewerGL()
-    viewer.set_model(combined_model)
-    viewer.set_world_offsets((0.0, 0.0, 0.0)) # So the two
-    viewer.show_particles = True
+    renderer = CoupledRender(rigid_builder, fluid_builder, fluid_model)
 
     fps = 60
     frames = 360
@@ -142,30 +131,20 @@ if __name__ == "__main__":
 
                     # r_s2 = (1 - α)r_s0 + αr_s1
                     alpha = (i + 1.0) / rigid_ratio
-                    fluid_solver.interpolate_rigid_states(
+                    coupler.interpolate_rigid_states(
                         rigid_state0, rigid_state1, alpha, rigid_state2
                     )
 
                     # fluid step
-                    fluid_solver.update_rigid_particles(rigid_state2, fluid_state0)
+                    coupler.update_fluid_boundaries(rigid_state2, fluid_state0)
                     fluid_solver.step(fluid_state0, fluid_state1, None, None, dt_fluid)
-                    fluid_solver.accumulate_rigid_forces(rigid_state1, fluid_state1)
+                    coupler.apply_fluid_forces(fluid_state1, rigid_state1)
                     fluid_state0, fluid_state1 = fluid_state1, fluid_state0
 
                 # divide by # of steps
-                fluid_solver.average_rigid_forces(rigid_state1, rigid_ratio)
+                coupler.average_rigid_forces(rigid_state1, rigid_ratio)
                 rigid_state0, rigid_state1 = rigid_state1, rigid_state0
 
-        # Update World 0 (rigid bodies)  
-        combined_state.body_q = rigid_state0.body_q  
-        combined_state.body_qd = rigid_state0.body_qd  
-        
-        # Update World 1 (fluid particles)  
-        combined_state.particle_q = fluid_state0.particle_q  
-        combined_state.particle_qd = fluid_state0.particle_qd
+        renderer.render_frame(f * (1 / fps), rigid_state0, fluid_state0)
 
-        viewer.begin_frame(f * (1 / fps))
-        viewer.log_state(combined_state)
-        viewer.end_frame()
-
-    viewer.close()
+    renderer.close()
